@@ -53,7 +53,7 @@
           using Microsoft.Extensions.Hosting;
           using Microsoft.AspNetCore.Builder;
           using Microsoft.Extensions.DependencyInjection;
-
+          
           namespace MobileStoreApp
           {
               public class Program
@@ -62,7 +62,7 @@
                   {
                       CreateHostBuilder(args).Build().Run();
                   }
-
+          
                   public static IHostBuilder CreateHostBuilder(string[] args) =>
                       Host.CreateDefaultBuilder(args)
                           .ConfigureWebHostDefaults(webBuilder =>
@@ -70,14 +70,14 @@
                               webBuilder.UseStartup<Startup>();
                           });
               }
-
+          
               public class Startup
               {
                   public void ConfigureServices(IServiceCollection services)
                   {
                       services.AddControllers();
                   }
-
+          
                   public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
                   {
                       if (env.IsDevelopment())
@@ -98,16 +98,101 @@
                       });
                   }
               }
-
-              // Código con malas prácticas y código espagueti
+          
+              // Singleton: StoreManager solo tendrá una única instancia en toda la aplicación
+              public class StoreManager
+              {
+                  private static StoreManager instance = null;
+                  private static readonly object padlock = new object();
+                  public List<Mobile> mobiles = new List<Mobile>();
+                  private List<IObserver> observers = new List<IObserver>();
+          
+                  private StoreManager() { }
+          
+                  public static StoreManager Instance
+                  {
+                      get
+                      {
+                          lock (padlock)
+                          {
+                              if (instance == null)
+                              {
+                                  instance = new StoreManager();
+                              }
+                              return instance;
+                          }
+                      }
+                  }
+          
+                  // Observer: Agregar observadores como inventario y facturación
+                  public void AddObserver(IObserver observer)
+                  {
+                      observers.Add(observer);
+                  }
+          
+                  public void NotifyObservers(Mobile mobile, int quantity)
+                  {
+                      foreach (var observer in observers)
+                      {
+                          observer.Update(mobile, quantity);
+                      }
+                  }
+          
+                  // Factory Method: Usar una fábrica para crear los móviles
+                  public void AddMobile(string model, string brand, double price, List<string> features)
+                  {
+                      MobileFactory factory = new ConcreteMobileFactory();
+                      var mobile = factory.CreateMobile(model, brand, price, features);
+                      mobiles.Add(mobile);
+                      mobile.PrintDetails();
+                  }
+          
+                  public void PrintAllMobiles()
+                  {
+                      foreach (var mobile in mobiles)
+                      {
+                          mobile.PrintDetails();
+                      }
+                  }
+          
+                  // ProcessSale con Observer para notificar a los subsistemas
+                  public void ProcessSale(string model, int quantity)
+                  {
+                      Mobile mobile = mobiles.Find(m => m.Model == model);
+                      if (mobile != null)
+                      {
+                          Console.WriteLine($"Processing sale for {quantity} units of {mobile.Model}");
+                          NotifyObservers(mobile, quantity);  // Notificamos a los observadores
+                      }
+                      else
+                      {
+                          Console.WriteLine("Mobile not found");
+                      }
+                  }
+              }
+          
+              // Factory Method: Definir una interfaz para crear móviles
+              public abstract class MobileFactory
+              {
+                  public abstract Mobile CreateMobile(string model, string brand, double price, List<string> features);
+              }
+          
+              public class ConcreteMobileFactory : MobileFactory
+              {
+                  public override Mobile CreateMobile(string model, string brand, double price, List<string> features)
+                  {
+                      return new Mobile { Model = model, Brand = brand, Price = price, Features = features };
+                  }
+              }
+          
               public class Mobile
               {
                   public string Model;
                   public string Brand;
                   public double Price;
                   public List<string> Features = new List<string>();
-
-                  public void PrintDetails()
+          
+                  public virtual void PrintDetails()
                   {
                       Console.WriteLine($"Model: {Model}, Brand: {Brand}, Price: {Price:C}");
                       Console.WriteLine("Features:");
@@ -117,87 +202,144 @@
                       }
                   }
               }
-
-              public class StoreManager
+          
+              // Observer: Interface para observadores
+              public interface IObserver
               {
-                  public List<Mobile> mobiles = new List<Mobile>();
-                  public void AddMobile(string model, string brand, double price, List<string> features)
+                  void Update(Mobile mobile, int quantity);
+              }
+          
+              public class Inventory : IObserver
+              {
+                  public void Update(Mobile mobile, int quantity)
                   {
-                      var mobile = new Mobile();
-                      mobile.Model = model;
-                      mobile.Brand = brand;
-                      mobile.Price = price;
-                      mobile.Features = features;
-                      mobiles.Add(mobile);
-                      mobile.PrintDetails();
-                  }
-
-                  public void PrintAllMobiles()
-                  {
-                      foreach (var mobile in mobiles)
-                      {
-                          mobile.PrintDetails();
-                      }
-                  }
-
-                  // Método largo y complejo sin modularizar
-                  public void ProcessSale(string model, int quantity)
-                  {
-                      Mobile mobile = null;
-                      foreach (var m in mobiles)
-                      {
-                          if (m.Model == model)
-                          {
-                              mobile = m;
-                              break;
-                          }
-                      }
-                      if (mobile != null)
-                      {
-                          Console.WriteLine($"Processing sale for {quantity} units of {mobile.Model}");
-                          // Código adicional para procesar la venta...
-                      }
-                      else
-                      {
-                          Console.WriteLine("Mobile not found");
-                      }
+                      Console.WriteLine($"Inventory updated for {mobile.Model} - Sold: {quantity}");
                   }
               }
-
-              // Clase con responsabilidades mixtas (violación del principio de responsabilidad única)
-              public class InventoryAndBilling
+          
+              public class Billing : IObserver
               {
-                  private List<Mobile> inventory = new List<Mobile>();
-                  public void AddToInventory(Mobile mobile)
-                  {
-                      inventory.Add(mobile);
-                  }
-
-                  public void GenerateBill(Mobile mobile, int quantity)
+                  public void Update(Mobile mobile, int quantity)
                   {
                       double total = mobile.Price * quantity;
-                      Console.WriteLine($"Bill: {mobile.Model} x{quantity} = {total:C}");
+                      Console.WriteLine($"Billing: {mobile.Model} x{quantity} = {total:C}");
                   }
               }
-
-              // Código no reutilizable y acoplado
-              public class Promotion
+          
+              // Facade: Simplificar las interacciones con el inventario y la facturación
+              public class StoreFacade
+              {
+                  private Inventory inventory = new Inventory();
+                  private Billing billing = new Billing();
+          
+                  public void ProcessSale(Mobile mobile, int quantity)
+                  {
+                      inventory.Update(mobile, quantity);
+                      billing.Update(mobile, quantity);
+                      Console.WriteLine("Sale processed via facade.");
+                  }
+              }
+          
+              // Decorator: Agregar funcionalidades adicionales a un móvil de forma dinámica
+              public abstract class MobileDecorator : Mobile
+              {
+                  protected Mobile mobile;
+          
+                  public MobileDecorator(Mobile mobile)
+                  {
+                      this.mobile = mobile;
+                  }
+          
+                  public override void PrintDetails()
+                  {
+                      mobile.PrintDetails();
+                  }
+              }
+          
+              public class InsuranceDecorator : MobileDecorator
+              {
+                  public InsuranceDecorator(Mobile mobile) : base(mobile) { }
+          
+                  public override void PrintDetails()
+                  {
+                      base.PrintDetails();
+                      Console.WriteLine("Includes insurance.");
+                  }
+              }
+          
+              // Strategy: Definir varias estrategias de descuento
+              public interface IDiscountStrategy
+              {
+                  void ApplyDiscount(Mobile mobile);
+              }
+          
+              public class BrandXDiscountStrategy : IDiscountStrategy
               {
                   public void ApplyDiscount(Mobile mobile)
+                  {
+                      mobile.Price *= 0.9;
+                      Console.WriteLine($"Discount applied to {mobile.Model}. New price: {mobile.Price:C}");
+                  }
+              }
+          
+              public class BrandYDiscountStrategy : IDiscountStrategy
+              {
+                  public void ApplyDiscount(Mobile mobile)
+                  {
+                      mobile.Price *= 0.85;
+                      Console.WriteLine($"Discount applied to {mobile.Model}. New price: {mobile.Price:C}");
+                  }
+              }
+          
+              public class NoDiscountStrategy : IDiscountStrategy
+              {
+                  public void ApplyDiscount(Mobile mobile)
+                  {
+                      Console.WriteLine("No discount available for this brand.");
+                  }
+              }
+          
+              // Chain of Responsibility: Manejo de descuentos mediante una cadena
+              public abstract class DiscountHandler
+              {
+                  protected DiscountHandler next;
+          
+                  public void SetNext(DiscountHandler nextHandler)
+                  {
+                      next = nextHandler;
+                  }
+          
+                  public abstract void Handle(Mobile mobile);
+              }
+          
+              public class BrandXDiscountHandler : DiscountHandler
+              {
+                  public override void Handle(Mobile mobile)
                   {
                       if (mobile.Brand == "BrandX")
                       {
                           mobile.Price *= 0.9;
-                          Console.WriteLine($"Discount applied to {mobile.Model}. New price: {mobile.Price:C}");
+                          Console.WriteLine($"BrandX discount applied to {mobile.Model}. New price: {mobile.Price:C}");
                       }
-                      else if (mobile.Brand == "BrandY")
+                      else if (next != null)
+                      {
+                          next.Handle(mobile);
+                      }
+                  }
+              }
+          
+              public class BrandYDiscountHandler : DiscountHandler
+              {
+                  public override void Handle(Mobile mobile)
+                  {
+                      if (mobile.Brand == "BrandY")
                       {
                           mobile.Price *= 0.85;
-                          Console.WriteLine($"Discount applied to {mobile.Model}. New price: {mobile.Price:C}");
+                          Console.WriteLine($"BrandY discount applied to {mobile.Model}. New price: {mobile.Price:C}");
                       }
-                      else
+                      else if (next != null)
                       {
-                          Console.WriteLine("No discount available for this brand.");
+                          next.Handle(mobile);
                       }
                   }
               }
